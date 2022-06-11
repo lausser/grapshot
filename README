@@ -1,0 +1,11 @@
+function run() {
+  pidd=$1
+  docker run -it --rm --net=host -e GRAPSHOT_DASHBOARDS=/dashboards.yml -v $HOME//tmp/grapshot.${pidd}/dashboards.yml:/dashboards.yml -v $HOME//tmp/grapshot.${pidd}/output:/output --entrypoint=/usr/bin/bash lausser/grapshot:latest
+}
+
+IF:
+Error processing tar file(exit status 1): potentially insufficient UIDs or GIDs available in user namespace 
+THEN:
+add username:offset:10000 to /etc/subuid und /etc/subgid
+podman system migrate
+

@@ -1,0 +1,187 @@
+﻿[%# EDIT #%]
+[% IF block == 'edit' %]
+  [%
+    required_fields = [
+        { 'local_omd' => [ 'Use Grafana of this OMD site', 'yes_no', 'yes', '', 1 ] },
+        { 'base_url' => [ 'Base Url of Grafana Dashboards', 'url', '', '(everything up to /d)', 1 ] },
+        { name => 'urls', desc => '', type => 'formlist', multiple => 1, childs => [
+                { name => 'dashboard_id', desc => 'ID', type => 'url' },
+                { name => 'dashboard_title', desc => 'Title', type => 'url' },
+              ]
+        },
+        { name => 'postprocess', desc => 'manipulate the screenshot', type => 'yes_no', default => 'no', required => 0 },
+        { name => 'colors', desc => 'reduce to a limited number of colors', type => 'select', options => [8, 32, 256, "true"], default => 'true', required => 0 },
+        { name => 'resize', desc => 'reduce the image width', type => 'select', options => [800, 960, 1024, "-"], default => '-', required => 0 },
+        { name => 'debug', desc => 'enable debugging', type => 'yes_no', default => 'no', required => 0 },
+    ];
+  %]
+[% END %]
+
+[%# SENDING MAIL #%]
+[% IF block == 'mail' +%]
+SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
+
+[% loc("Your report is attached.") +%]
+
+[%+ END %]
+
+
+
+[%# REPORT LAYOUT #%]
+[% IF block == 'render' %]
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+  "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <title>[% r.name %]</title>
+  <style>
+    @media print
+    {
+      h1 {
+        page-break-before:always;
+        text-align: center;
+        border-bottom: 1px solid #ddd;
+        line-height: 0;
+        padding: 0;
+      }
+      h1 span {
+        background: #fff;
+        padding: 0 15px;
+      }
+      img {
+        page-break-inside: avoid;
+        max-width: 100%;
+        width: auto;
+      }
+    }
+  </style>
+
+</head>
+<body>
+[% TRY %]
+[% RAWPERL %]
+   use Data::Dumper;
+   use Cwd qw(cwd getcwd);
+   use File::Path qw(rmtree);
+   use File::Basename qw(basename);
+   use MIME::Base64;
+
+   my $tmp_dir = "/tmp/grapshot";
+   if (exists $ENV{OMD_ROOT}) {
+     $tmp_dir = $ENV{OMD_ROOT}.$tmp_dir;
+   }
+   foreach my $old_tmp_dir (glob $tmp_dir.".*") {
+     # cleanup leftover temporary folders older than a day
+     my $age = (time - (stat($old_tmp_dir))[9]) / 3600;
+     if ($age > 24) {
+       rmtree $old_tmp_dir;
+     }
+   }
+   $tmp_dir .= ".$$";
+   mkdir($tmp_dir);
+   mkdir($tmp_dir."/output", 0777);
+
+   my $local_omd = $stash->get("r.params.local_omd");
+   my $base_url = $stash->get("r.params.base_url")."/";
+   my $urls = $stash->get("r.params.urls");
+   my $postprocess = $stash->get("r.params.postprocess") eq "yes" ? "true" : "false";
+   my $colors = $stash->get("r.params.colors") eq "true" ? 0 : $stash->get("r.params.colors");
+   my $resize = $stash->get("r.params.resize") eq "-" ? "false" : "true";
+   my $resize_width = $stash->get("r.params.resize") eq "-" ? 0 : $stash->get("r.params.resize");
+   my $debug = 0;
+   eval {
+     $debug = ($stash->get("r.params.debug") eq "yes") ? 1 : 0;
+   };
+
+   if ($local_omd eq "yes") {
+     # CONFIG_GRAFANA_TCP_PORT='8004'
+     my $grafana_port = 9000;
+     open(SITE, $ENV{OMD_ROOT}."/etc/omd/site.conf");
+     foreach (<SITE>) {
+       if ($_ =~ /CONFIG_GRAFANA_TCP_PORT='(\d+)'/) {
+         $grafana_port = $1;
+       }
+     }
+     close(SITE);
+     if ($grafana_port != 9000) {
+       $base_url = "http://127.0.0.1:".$grafana_port."/".$ENV{OMD_SITE}."/grafana/d/";
+     }
+   }
+
+   my $dashboards_file = $tmp_dir."/dashboards.yml";
+   open(DASH, ">$dashboards_file");
+   printf DASH "omd_site: %s\n", exists $ENV{OMD_SITE} ? $ENV{OMD_SITE} : "---";
+   printf DASH "baseurl: %s\n", $base_url;
+   printf DASH "output: /output\n";
+   printf DASH "debug: true\n";
+   printf DASH "viewport_width: 1920\n";
+   printf DASH "setting_postprocess: %s\n", $stash->get("r.params.postprocess");
+   printf DASH "postprocess: %s\n", $postprocess;
+   printf DASH "colormode: RGB\n";
+   printf DASH "colors: 8\n";
+   printf DASH "resize: %s\n", $resize;
+   printf DASH "resize_width: %s\n", $resize_width;
+   printf DASH "png: true\n";
+   printf DASH "dashboards: \n";
+   my $signature = sprintf "%08X", rand(0xffffffff);
+   my $index = 1;
+   foreach my $url (@{$urls}) {
+     printf DASH "- url: \"%s\"\n", $url->{dashboard_id};
+     printf DASH "  name: \"%s\"\n", $url->{dashboard_title} ? $url->{dashboard_title} : "";
+     $url->{signature} = sprintf "%d_%s", $index++, $$;
+     printf DASH "  signature: \"%s\"\n", $url->{signature};
+   }
+   close(DASH);
+
+   $ENV{GRAPSHOT_DASHBOARDS} = $dashboards_file;
+   my $docker_cmd = sprintf "docker run --init --rm --net=host -e GRAPSHOT_DASHBOARDS=/dashboards.yml -v %s:/dashboards.yml -v %s/output:/output lausser/grapshot:latest", $dashboards_file, $tmp_dir;
+   my $docker_out = `$docker_cmd 2>&1 | tee /tmp/grapshot-diag.log`;
+
+   foreach my $url (@{$urls}) {
+     foreach my $file (glob $tmp_dir."/output/*") {
+       if ($file =~ /\/$url->{signature}/) {
+         open(INPUT, $file);
+         binmode INPUT;
+         undef $/;
+         my $contents = <INPUT>;
+         close(INPUT);
+         my $base64 = encode_base64($contents);
+         $file = basename($file);
+         $file =~ s/$url->{signature}_//;
+         $file =~ s/\.png$//;
+         $output .= "<h1><span>".($url->{dashboard_title} ?
+             $url->{dashboard_title} : $file)."</span></h1>";
+         $output .= sprintf("<img src=\"data:image/png;base64,%s\">", $base64);
+         unlink $file;
+       }
+     }
+   } 
+   if ($debug) {
+     $output .= "<h1><span>config</span></h1>";
+     my $dashboards_yml = do { local(@ARGV, $/) = $dashboards_file; <> };
+     $output .= "<pre><code>\n";
+     $output .= $dashboards_yml;
+     $output .= "</code></pre>\n";
+     $output .= "<pre><code>\n";
+     $output .= `ls -l $tmp_dir/output`;
+     $output .= "</code></pre>\n";
+     $output .= "<pre><code>\n";
+     $output .= `file $tmp_dir/output/*`;
+     $output .= "</code></pre>\n";
+     my $grapshot_log = do { local(@ARGV, $/) = $tmp_dir."/output/grapshot.log"; <> };
+     $output .= "<pre><code>\n";
+     $output .= $grapshot_log;
+     $output .= "</code></pre>\n";
+   }
+   if (! $debug) {
+     rmtree $tmp_dir;
+   }
+[% END %]
+[% CATCH %]
+   ERROR! Type: [% error.type %]
+          Info: [% error.info %]
+[% END %]
+</body>
+</html>
+[% END %]
