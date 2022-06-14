@@ -153,7 +153,7 @@ async def main(config):
 
                 await loc_div_dashboard_scroll.hover()
                 while div_react_grid_layout["height"]+div_react_grid_layout["y"] >= div_dashboard_container["height"]:
-                    logging.debug("scroll...")
+                    logging.debug("scroll down {} pixel...".format(int(viewport_height/3)))
                     await page.mouse.wheel(0, int(viewport_height/3))
                     try:
                         await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
