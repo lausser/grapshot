@@ -6,7 +6,7 @@ import re
 import time
 import logging
 from PIL import Image, ImageDraw, ImageFont
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 
 async def main(config):
@@ -20,6 +20,7 @@ async def main(config):
             resize = shrink the image width (and calculate new heigth)
             resize_width = new width (800 default)
             baseurl = url up to /d
+            loadwait = seconds to wait until there is no more loading wheel
         per dashboard:
             url = everything after the /d/....
             name = description, default is the dashboards title
@@ -44,6 +45,7 @@ async def main(config):
         page.set_default_timeout(120000)
         page.set_default_navigation_timeout(120000)
         logging.debug("initial viewport {}x{}".format(page.viewport_size["width"], page.viewport_size["height"]))
+        load_wait = int(config["load_wait"])*1000 if "load_wait" in config else 10000
         #viewport_width = 1632
         viewport_width = int(config["viewport_width"]) if "viewport_width" in config else 1280
         viewport_height = 1024
@@ -126,9 +128,40 @@ async def main(config):
                     logging.debug("  div_dashboard_content {} {}".format(div_dashboard_content["height"], div_dashboard_content["y"]))
                     logging.debug("   div_react_grid_layout {} {}".format(div_react_grid_layout["height"], div_react_grid_layout["y"]))
 
+                # expect that there is at least one progress/loading-wheel
+                # immediately after a page has loaded.
+                loc_loading_wheel = page.locator("div.panel-loading")
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("initially found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).not_to_have_count(0, timeout=1000)
+                except:
+                    logging.debug("no wheel appeared")
+                    # maybe loading was very quick and is already done
+                    pass
+                # now expect all wheels to disappear.
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                    logging.debug("no more wheels")
+                except:
+                    # loading took to much time
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("still found {} wheels after {}s".format(num_loading_wheel, load_wait/1000))
+                    pass
+
                 await loc_div_dashboard_scroll.hover()
                 while div_react_grid_layout["height"]+div_react_grid_layout["y"] >= div_dashboard_container["height"]:
-                    await page.mouse.wheel(0, 100)
+                    logging.debug("scroll...")
+                    await page.mouse.wheel(0, int(div_react_grid_layout["height"]/3))
+                    try:
+                        await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                        logging.debug("no loading wheel found")
+                    except:
+                        num_loading_wheel = await loc_loading_wheel.count()
+                        logging.info("still {} wheels found, wait for network idle".format(num_loading_wheel))
+                        pass
                     await page.wait_for_load_state("networkidle")
 
                     div_dashboard_container = await loc_div_dashboard_container.bounding_box()
@@ -136,7 +169,6 @@ async def main(config):
                     div_dashboard_scroll = await loc_div_dashboard_scroll.bounding_box()
                     div_dashboard_content = await loc_div_dashboard_content.bounding_box()
                     div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
-                    logging.debug("scroll...")
                     logging.debug("div_dashboard_container {} {}".format(div_dashboard_container["height"], div_dashboard_container["y"]))
                     logging.debug(" div_page_toolbar {} {}".format(div_page_toolbar["height"], div_page_toolbar["y"]))
                     logging.debug(" div_dashboard_scroll {} {}".format(div_dashboard_scroll["height"], div_dashboard_scroll["y"]))
