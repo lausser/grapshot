@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.27.0-focal
+FROM mcr.microsoft.com/playwright:v1.28.0-focal
 ENV DEBIAN_FRONTEND="noninteractive" TZ="UTC"
 RUN apt-get update
 RUN apt-get install -y vim
