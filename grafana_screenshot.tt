@@ -9,8 +9,9 @@
                 { name => 'dashboard_title', desc => 'Title', type => 'url' },
               ]
         },
+        { name => 'load_wait', desc => 'max seconds to wait for panels to load', type => 'select', options => [10, 30, 60, 120], default => '10', required => 0 },
         { name => 'postprocess', desc => 'manipulate the screenshot', type => 'yes_no', default => 'no', required => 0 },
-        { name => 'colors', desc => 'reduce to a limited number of colors', type => 'select', options => [8, 32, 256, "true"], default => 'true', required => 0 },
+        { name => 'colors', desc => 'reduce to a limited number of colors', type => 'select', options => [2, 4, 8, 32, 256, "true"], default => 'true', required => 0 },
         { name => 'resize', desc => 'reduce the image width', type => 'select', options => [800, 960, 1024, "-"], default => '-', required => 0 },
         { name => 'debug', desc => 'enable debugging', type => 'yes_no', default => 'no', required => 0 },
     ];
@@ -38,12 +39,21 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
   <style>
     @media print
     {
-      h1 {
-        page-break-before:always;
+      h1:first-of-type, section > h1:first-child {
+        break-before: avoid;
         text-align: center;
         border-bottom: 1px solid #ddd;
         line-height: 0;
         padding: 0;
+        font-size: 80%;
+      }
+      h1 {
+        break-before: recto;
+        text-align: center;
+        border-bottom: 1px solid #ddd;
+        line-height: 0;
+        padding: 0;
+        font-size: 80%;
       }
       h1 span {
         background: #fff;
@@ -66,6 +76,7 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
    use File::Path qw(rmtree);
    use File::Basename qw(basename);
    use MIME::Base64;
+   use POSIX qw(strftime);
 
    my $tmp_dir = "/tmp/grapshot";
    if (exists $ENV{OMD_ROOT}) {
@@ -89,6 +100,7 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
    my $colors = $stash->get("r.params.colors") eq "true" ? 0 : $stash->get("r.params.colors");
    my $resize = $stash->get("r.params.resize") eq "-" ? "false" : "true";
    my $resize_width = $stash->get("r.params.resize") eq "-" ? 0 : $stash->get("r.params.resize");
+   my $load_wait = $stash->get("r.params.load_wait");
    my $debug = 0;
    eval {
      $debug = ($stash->get("r.params.debug") eq "yes") ? 1 : 0;
@@ -123,6 +135,7 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
    printf DASH "resize: %s\n", $resize;
    printf DASH "resize_width: %s\n", $resize_width;
    printf DASH "png: true\n";
+   printf DASH "load_wait: %d\n", $load_wait;
    printf DASH "dashboards: \n";
    my $signature = sprintf "%08X", rand(0xffffffff);
    my $index = 1;
@@ -134,6 +147,7 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
    }
    close(DASH);
 
+   my $now = strftime('%Y-%m-%d %H:%M', localtime);
    $ENV{GRAPSHOT_DASHBOARDS} = $dashboards_file;
    my $docker_cmd = sprintf "docker run --init --rm --net=host -e GRAPSHOT_DASHBOARDS=/dashboards.yml -v %s:/dashboards.yml -v %s/output:/output lausser/grapshot:latest", $dashboards_file, $tmp_dir;
    my $docker_out = `$docker_cmd 2>&1 | tee /tmp/grapshot-diag.log`;
@@ -151,7 +165,7 @@ SUBJECT: [% loc("Report:") +%] [%+ r.name +%]
          $file =~ s/$url->{signature}_//;
          $file =~ s/\.png$//;
          $output .= "<h1><span>".($url->{dashboard_title} ?
-             $url->{dashboard_title} : $file)."</span></h1>";
+             $url->{dashboard_title} : $file)." (".$now.")</span></h1>";
          $output .= sprintf("<img src=\"data:image/png;base64,%s\">", $base64);
          unlink $file;
        }
