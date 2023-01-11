@@ -73,8 +73,16 @@ async def main(config):
                 logging.debug("Detected version {}".format(grafana_version))
                 grafana_version = re.match(r'[^\d\.]+([\d\.]+)', grafana_version).group(1)
             except:
-                logging.critical("Could not find the Grafana version")
-                grafana_version = "0.0"
+                try:
+                    whole_page = await page.content()
+                    version_m = re.search(r'(Grafana\sv([\d\.]+))', whole_page)
+                    if version_m:
+                        grafana_version = version_m.group(2)
+                        logging.debug("Detected version {}".format(grafana_version))
+                except Exception as e:
+                    print(e)
+                    logging.critical("Could not find the Grafana version")
+                    grafana_version = "0.0"
 
             # If the user did not set a name for a dashboard in the file
             # dashboards.yml, we name use the dashboard title shown
@@ -84,6 +92,7 @@ async def main(config):
             title = await page.title()
             logging.debug("Dashboard title is {}".format(title))
             filetype = config["filetype"] if "filetype" in config else "png"
+            time.sleep(1000)
             if "name" in dashboard and dashboard["name"]:
                 name = dashboard["name"].replace(" ", "_").replace("/", "_")
                 filename = config["output"]+"/"+dashboard["signature"]+"_"+name+"."+filetype
@@ -96,7 +105,38 @@ async def main(config):
                     title = re.sub("[^0-9a-zA-Z-]+", "_", title)
                 filename = config["output"]+"/"+dashboard["signature"]+"_"+title+"."+filetype
 
-            if grafana_version[0].startswith("7"):
+            if grafana_version[0].startswith("9"):
+                #    scrollbar-view
+                #?     dashboard-content - scrollbar-view without some margin
+                #      submenu-controls - dropdown-variables (optional!)
+                #      react-grid-layout - the panels
+                #loc_div_dashboard_container = page.locator("div.dashboard-container")
+                #loc_div_page_toolbar = page.locator("div.page-toolbar")
+                #loc_div_dashboard_scroll = page.locator("div.dashboard-scroll")
+                #loc_div_dashboard_content = page.locator("div.dashboard-content")
+                loc_div_react_grid_layout = page.locator("div.react-grid-layout")
+                loc_div_react_grid_layout_parent = page.locator("div.react-grid-layout >> xpath=..")
+                logging.debug(loc_div_react_grid_layout)
+                logging.debug(loc_div_react_grid_layout_parent)
+                #div_dashboard_container = await loc_div_dashboard_container.bounding_box()
+                #div_page_toolbar = await loc_div_page_toolbar.bounding_box()
+                #div_dashboard_scroll = await loc_div_dashboard_scroll.bounding_box()
+                #div_dashboard_content = await loc_div_dashboard_content.bounding_box()
+                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                logging.debug("div_react_grid_layout (all the panels) height is {}".format(div_react_grid_layout["height"]))
+                # expect that there is at least one progress/loading-wheel
+                # immediately after a page has loaded.
+                loc_loading_wheel = page.locator("div.panel-loading")
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("initially found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).not_to_have_count(0, timeout=1000)
+                except:
+                    logging.debug("no wheel appeared")
+                    # maybe loading was very quick and is already done
+                    pass
+                pass
+            elif grafana_version[0].startswith("7"):
                 # we have a hierarchy of divs in this order:
                 # scroll-canvas - the whole page without left menu
                 #  dashboard-container -
@@ -231,12 +271,13 @@ async def main(config):
             else:
                 # Write the error message to an image file, so that it later
                 # can be shown in a pdf report.
-                logging.critical("This version of Grafana is not supported")
+                logging.critical("Version {} of Grafana is not supported".format(grafana_version))
                 image = Image.new('RGB', (viewport_width, 300), color = (73, 109, 137))
                 drawing = ImageDraw.Draw(image)
                 font = ImageFont.truetype('/usr/share/fonts/truetype/ubuntu/UbuntuMono-B.ttf', 40)
                 drawing.text((10,10), "Version {} of Grafana is not supported".format(grafana_version), font=font, fill=(255,255,0))
                 image.save(filename)
+            time.sleep(10)
 
         await browser.close()
         logging.debug("Browser closed")
