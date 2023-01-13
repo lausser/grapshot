@@ -114,6 +114,7 @@ async def main(config):
                 #loc_div_page_toolbar = page.locator("div.page-toolbar")
                 #loc_div_dashboard_scroll = page.locator("div.dashboard-scroll")
                 #loc_div_dashboard_content = page.locator("div.dashboard-content")
+                loc_div_dashboard_scroll = page.locator("div.track-vertical") # draufhovern und dann scrollen
                 loc_div_react_grid_layout = page.locator("div.react-grid-layout")
                 loc_div_react_grid_layout_parent = page.locator("div.react-grid-layout >> xpath=..")
                 logging.debug(loc_div_react_grid_layout)
