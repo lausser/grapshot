@@ -1,6 +1,14 @@
+#! /bin/bash
 set -ex
+shopt -s expand_aliases
 USERNAME=lausser
 IMAGE=grapshot
+if [ -z "$(which podman 2>/dev/null)" ]; then
+  alias podman="docker"
+elif [ -z "$(which docker 2>/dev/null)" ]; then
+  alias docker="podman"
+fi
+alias docker="/usr/bin/echo"
 git pull
 # bump version
 docker run --rm -v "$PWD":/app treeder/bump patch
