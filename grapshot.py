@@ -92,7 +92,7 @@ async def main(config):
             title = await page.title()
             logging.debug("Dashboard title is {}".format(title))
             filetype = config["filetype"] if "filetype" in config else "png"
-            time.sleep(1000)
+            #time.sleep(1000)
             if "name" in dashboard and dashboard["name"]:
                 name = dashboard["name"].replace(" ", "_").replace("/", "_")
                 filename = config["output"]+"/"+dashboard["signature"]+"_"+name+"."+filetype
@@ -105,7 +105,7 @@ async def main(config):
                     title = re.sub("[^0-9a-zA-Z-]+", "_", title)
                 filename = config["output"]+"/"+dashboard["signature"]+"_"+title+"."+filetype
 
-            if grafana_version[0].startswith("9"):
+            if grafana_version.startswith("9"):
                 #    scrollbar-view
                 #?     dashboard-content - scrollbar-view without some margin
                 #      submenu-controls - dropdown-variables (optional!)
@@ -137,7 +137,7 @@ async def main(config):
                     # maybe loading was very quick and is already done
                     pass
                 pass
-            elif grafana_version[0].startswith("7"):
+            elif grafana_version.startswith("7"):
                 # we have a hierarchy of divs in this order:
                 # scroll-canvas - the whole page without left menu
                 #  dashboard-container -
@@ -269,15 +269,65 @@ async def main(config):
                     logging.debug("now image mode is {}, dimensions {}x{}".format(image.mode, width, height))
                     filesize2 = os.stat(filename).st_size
                     logging.debug("reduced the filesize from {} to {}".format(filesize1, filesize2))
-            else:
+            elif grafana_version.startswith("10"):
+                # we have a hierarchy of divs in this order:
+                # div id="reactRoot"
+                #  div class="grafana-app"
+                #   div class="main-view"
+                #    div id="pageContent"
+                #    ...
+                #     div class="scrollbar-view"
+                #     -< 1627x952
+                #     -> links oben klicken, dann mausradscrollen moeglich
+                #      ...
+                #       div class="react-grid-layout"
+                #       -> 1587x1284
+                #       -> paneltitel und panel...  hat height und width
+                #     div class="track-horizontal"
+                #     div class="track-vertical" -> scrollbar
+                #time.sleep(100001)
+                logging.debug("locate div.grafana-app")
+                loc_div_grafana_app = page.locator("div.grafana-app")
+                logging.debug("div.pageContent")
+                loc_div_page_content = page.locator("pageContent")
+  # 2nd (1st is in left menu)
+                logging.debug("div.scrollbar-view")
+                loc_div_scrollbar_view = loc_div_page_content.locator("div.scrollbar-view")
+                logging.debug("div.react-grid-layout")
+                #loc_div_react_grid_layout = loc_div_page_content.locator("div.react-grid-layout")
+                loc_div_react_grid_layout = loc_div_page_content.locator("react-grid-layout")
+                logging.debug("box div.grafana-app")
+                div_div_grafana_app = await loc_div_grafana_app.bounding_box()
+                logging.debug("box div.react-grid-layout")
+                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                logging.debug("box div.scrollbar-view")
+                div_div_scrollbar_view = await loc_div_scrollbar_view.bounding_box()
+
+                logging.debug("div_react_grid_layout (all the panels) height is {}".format(div_react_grid_layout["height"]))
+                if True:
+                    logging.debug("div_div_scrollbar_view {} {}".format(div_div_scrollbar_view["height"], div_div_scrollbar_view["y"]))
+                    logging.debug("   div_react_grid_layout {} {}".format(div_react_grid_layout["height"], div_react_grid_layout["y"]))
+
+                # expect that there is at least one progress/loading-wheel
+                # immediately after a page has loaded.
+                loc_loading_wheel = page.locator("div.panel-loading")
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("initially found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).not_to_have_count(0, timeout=1000)
+                except:
+                    logging.debug("no wheel appeared")
+                    # maybe loading was very quick and is already done
+                    pass
+
+            #else:
+                await page.screenshot(path="/output/screen.png")
                 # Write the error message to an image file, so that it later
                 # can be shown in a pdf report.
                 logging.critical("Version {} of Grafana is not supported".format(grafana_version))
-                image = Image.new('RGB', (viewport_width, 300), color = (73, 109, 137))
-                drawing = ImageDraw.Draw(image)
-                font = ImageFont.truetype('/usr/share/fonts/truetype/ubuntu/UbuntuMono-B.ttf', 40)
-                drawing.text((10,10), "Version {} of Grafana is not supported".format(grafana_version), font=font, fill=(255,255,0))
-                image.save(filename)
+                logging.debug("now sleep")
+                time.sleep(100001)
+                logging.debug("now sleept")
             time.sleep(10)
 
         await browser.close()
