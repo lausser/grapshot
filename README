@@ -9,3 +9,10 @@ THEN:
 add username:offset:10000 to /etc/subuid und /etc/subgid
 podman system migrate
 
+to debug:
+apt install xserver-xephyr
+Xephyr -ac -br -screen 1280x1024 -dpi 90 :420 &
+DISPLAY=":420" /usr/bin/python3 /root/grapshot.py
+
+or:
+podman run --security-opt label=disable  -it --rm --net=host -e GRAPSHOT_DASHBOARDS=/dashboards.yml -v `pwd`/dashboards.yml:/dashboards.yml -v  `pwd`/output:/output --entrypoint=/usr/bin/bash -v /tmp/.X11-unix:/tmp/.X11-unix:rw -e DISPLAY -v `pwd`/grapshot.py:/root/grapshot.py -v $XAUTHORITY:/root/.Xauthority:ro lausser/grapshot:latest
