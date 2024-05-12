@@ -5,6 +5,7 @@ import sys
 import re
 import time
 import logging
+import tracemalloc
 from PIL import Image, ImageDraw, ImageFont
 from playwright.async_api import async_playwright, expect
 
@@ -114,7 +115,6 @@ async def main(config):
                 #loc_div_page_toolbar = page.locator("div.page-toolbar")
                 #loc_div_dashboard_scroll = page.locator("div.dashboard-scroll")
                 #loc_div_dashboard_content = page.locator("div.dashboard-content")
-                loc_div_dashboard_scroll = page.locator("div.track-vertical") # draufhovern und dann scrollen
                 loc_div_react_grid_layout = page.locator("div.react-grid-layout")
                 loc_div_react_grid_layout_parent = page.locator("div.react-grid-layout >> xpath=..")
                 logging.debug(loc_div_react_grid_layout)
@@ -275,37 +275,60 @@ async def main(config):
                 #  div class="grafana-app"
                 #   div class="main-view"
                 #    div id="pageContent"
+                #    -> rechter hauptteil. menue ist ein paralleles div zu diesem
                 #    ...
                 #     div class="scrollbar-view"
                 #     -< 1627x952
                 #     -> links oben klicken, dann mausradscrollen moeglich
-                #      ...
-                #       div class="react-grid-layout"
-                #       -> 1587x1284
-                #       -> paneltitel und panel...  hat height und width
+                #        oder hover
+                #      noch ein div, dann
+                #       <header data-test-id="data-testid Dashboard navigation"
+                #       <section aria-label="Dashboard submenu" <--
+                #       -> dashboard header
+                #       div style="flex: 1 1 auto" <---
+                #       ... darunter div class="react-grid-layout"
+                #         -> 1587x1284
+                #         -> paneltitel und panel...  hat height und width
                 #     div class="track-horizontal"
                 #     div class="track-vertical" -> scrollbar
                 #time.sleep(100001)
+
                 logging.debug("locate div.grafana-app")
                 loc_div_grafana_app = page.locator("div.grafana-app")
-                logging.debug("div.pageContent")
-                loc_div_page_content = page.locator("pageContent")
-  # 2nd (1st is in left menu)
-                logging.debug("div.scrollbar-view")
-                loc_div_scrollbar_view = loc_div_page_content.locator("div.scrollbar-view")
-                logging.debug("div.react-grid-layout")
-                #loc_div_react_grid_layout = loc_div_page_content.locator("div.react-grid-layout")
-                loc_div_react_grid_layout = loc_div_page_content.locator("react-grid-layout")
-                logging.debug("box div.grafana-app")
-                div_div_grafana_app = await loc_div_grafana_app.bounding_box()
-                logging.debug("box div.react-grid-layout")
-                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
-                logging.debug("box div.scrollbar-view")
-                div_div_scrollbar_view = await loc_div_scrollbar_view.bounding_box()
+                div_grafana_app = await loc_div_grafana_app.bounding_box()
 
+                logging.debug("locate #pageContent")
+                loc_div_page_content = page.locator("#pageContent")
+                div_page_content = await loc_div_page_content.bounding_box()
+
+                logging.debug("locate section Dashboard submenu")
+                loc_section_dashboard_submenu = page.locator("section[aria-label='Dashboard submenu']")
+                section_dashboard_submenu = await loc_section_dashboard_submenu.bounding_box()
+
+                logging.debug("locate header")
+                loc_header = page.get_by_test_id("data-testid Dashboard navigation")
+                header = await loc_header.bounding_box()
+
+                logging.debug("locate main with section and div")
+                loc_main = loc_header.locator('xpath=..')
+                main = await loc_main.bounding_box()
+
+                # main contains header section and a div
+                # its parent is a div scrollbar-view
+                logging.debug("locate div.scrollbar-view under main")
+                #loc_div_scrollbar_view = page.locator("div.scrollbar-view")
+                loc_div_scrollbar_view = loc_main.locator("xpath=..")
+                div_scrollbar_view = await loc_div_scrollbar_view.bounding_box()
+
+
+                logging.debug("box div.react-grid-layout")
+                loc_div_react_grid_layout = loc_main.locator("div.react-grid-layout")
+                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+
+                section_dashboard_submenu_height = section_dashboard_submenu["height"]
                 logging.debug("div_react_grid_layout (all the panels) height is {}".format(div_react_grid_layout["height"]))
                 if True:
-                    logging.debug("div_div_scrollbar_view {} {}".format(div_div_scrollbar_view["height"], div_div_scrollbar_view["y"]))
+                    logging.debug("div_scrollbar_view {} {}".format(div_scrollbar_view["height"], div_scrollbar_view["y"]))
                     logging.debug("   div_react_grid_layout {} {}".format(div_react_grid_layout["height"], div_react_grid_layout["y"]))
 
                 # expect that there is at least one progress/loading-wheel
@@ -319,15 +342,115 @@ async def main(config):
                     logging.debug("no wheel appeared")
                     # maybe loading was very quick and is already done
                     pass
+                # now expect all wheels to disappear.
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                    logging.debug("no more wheels")
+                except:
+                    # loading took to much time
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("still found {} wheels after {}s".format(num_loading_wheel, load_wait/1000))
+                    pass
 
-            #else:
+                await loc_div_scrollbar_view.hover()
+
+                # on a wheel down event, this happens:
+                # div_scrollbar_view height and y always stay the same
+                #  because it's a bit more than the browser size does not move
+                #  height 952 and y 80 mean: bottom visible area is 1032
+                # div_react_grid_layout height stays biig and y decreases.
+                #  it even gets negative, because the upper edge moves above the
+                #  visibe window. height 1284 and y 136 mean: bottom is at 1420
+                #  (136 is probably the height of the variable/button row)
+                # now we scroll until bottom 1420 decreases to 1032, so that
+                # bottom of visible area and bottom of dashboard touch
+                div_scrollbar_view_bottom = div_scrollbar_view["y"] + div_scrollbar_view["height"]
+                div_react_grid_layout_bottom = div_react_grid_layout["y"] + div_react_grid_layout["height"]
+                logging.debug("div_scrollbar_view_bottom {}".format(div_scrollbar_view_bottom))
+                logging.debug("div_react_grid_layout_bottom {}".format(div_react_grid_layout_bottom))
+                logging.debug("=--{}---   --{}--".format(div_scrollbar_view_bottom, div_react_grid_layout_bottom))
+                # offset is where content starts
+                div_scrollbar_view_offset = div_scrollbar_view["y"]
+                scroll_distance = int(div_scrollbar_view["height"] / 3)
+                #scroll_distance = 2
+                while div_scrollbar_view_bottom <= div_react_grid_layout_bottom:
+
+                    await page.mouse.wheel(0, scroll_distance)
+                    try:
+                        await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                        logging.debug("no loading wheel found")
+                    except:
+                        num_loading_wheel = await loc_loading_wheel.count()
+                        logging.info("still {} wheels found, wait for network idle".format(num_loading_wheel))
+                        pass
+                    await page.wait_for_load_state("networkidle")
+
+                    div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                    div_react_grid_layout_bottom = div_react_grid_layout["y"] + div_react_grid_layout["height"]
+                    logging.debug("---{}---   --{}--".format(div_scrollbar_view_bottom, div_react_grid_layout_bottom))
+
+
+                # Based on react-grid-layout plus the header heights
+                # we will resize the viewport so that the viewport is only
+                # as big as necessary but big enough to show all the panels.
+                # (plus a few pixels more, 2*toolbar height)
+#                div_page_toolbar = await loc_div_page_toolbar.bounding_box()
+#                try:
+#                    loc_div_submenu_controls = await page.wait_for_selector("div.submenu-controls")
+#                    logging.debug("submenu-controls found")
+#                    div_submenu_controls = await loc_div_submenu_controls.bounding_box()
+#                except:
+#                    div_submenu_controls = { "height": 0 }
+#                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                new_height = div_react_grid_layout["height"] + section_dashboard_submenu_height * 4
+                await page.set_viewport_size({"width": viewport_width, "height": new_height})
+                logging.debug("adjusted viewport size to {}x{}".format(viewport_width, new_height))
+
+
+                await loc_div_scrollbar_view.screenshot(path=filename)
+                if "pdf" in config and config["pdf"] == True:
+                    await page.pdf(path=filename+".pdf")
+                logging.info("Saved screenshot to {}".format(filename))
+                filesize1 = os.stat(filename).st_size
+                image = Image.open(filename)
+                width, height = image.size
+                logging.debug("filesize is {}".format(filesize1))
+                logging.debug("image mode is {}, dimensions {}x{}".format(image.mode, width, height))
+                if "postprocess" in config and config["postprocess"]:
+                    # PDF conversion may fail if the images are too big. Reduce
+                    # the size.
+                    colormode = config["colormode"] if "colormode" in config else "RGB"
+                    colors = int(config["colors"]) if "colors" in config else 256
+                    if image.mode != colormode and colors != "true":
+                        logging.debug("converting image to colormode {} with {} colors".format(colormode, colors))
+                        image = image.convert(colormode, palette=Image.ADAPTIVE, colors=colors)
+                    elif image.mode != colormode:
+                        logging.debug("converting image to colormode {}".format(colormode))
+                        image = image.convert(colormode)
+                    elif colors != "true":
+                        logging.debug("converting image to {} colors".format(colors))
+                        image = image.convert(image.mode, palette=Image.ADAPTIVE, colors=colors)
+                    width, height = image.size
+                    if "resize" in config and config["resize"]:
+                        new_width = int(config["resize_width"]) if "resize_width" in config else int(width/2)
+                        new_height = int(new_width * height / width)
+                        #image.resize((new_width, new_height)).save(filename, optimize=True)
+                        image.resize((new_width, new_height)).save(filename)
+                    else:
+                        image.save(filename)
+                    width, height = image.size
+                    logging.debug("now image mode is {}, dimensions {}x{}".format(image.mode, width, height))
+                    filesize2 = os.stat(filename).st_size
+                    logging.debug("reduced the filesize from {} to {}".format(filesize1, filesize2))
+
+                
+            else:
                 await page.screenshot(path="/output/screen.png")
                 # Write the error message to an image file, so that it later
                 # can be shown in a pdf report.
                 logging.critical("Version {} of Grafana is not supported".format(grafana_version))
-                logging.debug("now sleep")
-                time.sleep(100001)
-                logging.debug("now sleept")
             time.sleep(10)
 
         await browser.close()
