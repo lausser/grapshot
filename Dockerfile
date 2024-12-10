@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.43.0-jammy
+FROM mcr.microsoft.com/playwright:v1.49.0-noble
 ENV DEBIAN_FRONTEND="noninteractive" TZ="UTC"
 RUN apt-get update
 RUN apt-get install -y vim
