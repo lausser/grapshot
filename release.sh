@@ -5,12 +5,14 @@ USERNAME=lausser
 IMAGE=grapshot
 if [ -z "$(which podman 2>/dev/null)" ]; then
   alias podman="docker"
+  OPTS=""
 elif [ -z "$(which docker 2>/dev/null)" ]; then
   alias docker="podman"
+  OPTS="--security-opt label=disable"
 fi
 git pull
 # bump version
-docker run --rm -v "$PWD":/app docker.io/treeder/bump patch
+docker run --rm $OPTS -v "$PWD":/app docker.io/treeder/bump patch
 version=`cat VERSION`
 echo "version: $version"
 # run build
