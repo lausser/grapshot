@@ -26,5 +26,7 @@ git push
 git push --tags
 docker tag $USERNAME/$IMAGE:latest $USERNAME/$IMAGE:$version
 # push it
-docker push ghcr.io/$USERNAME/$IMAGE:latest
-docker push ghcr.io/$USERNAME/$IMAGE:$version
+#docker push ghcr.io/$USERNAME/$IMAGE:latest
+#docker push ghcr.io/$USERNAME/$IMAGE:$version
+docker push $USERNAME/$IMAGE:latest
+docker push $USERNAME/$IMAGE:$version
