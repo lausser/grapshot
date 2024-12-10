@@ -106,7 +106,183 @@ async def main(config):
                     title = re.sub("[^0-9a-zA-Z-]+", "_", title)
                 filename = config["output"]+"/"+dashboard["signature"]+"_"+title+"."+filetype
 
-            if grafana_version.startswith("9"):
+            if grafana_version.startswith("11"):
+                pass
+                logging.debug("locate div.grafana-app")
+                loc_div_grafana_app = page.locator("div.grafana-app")
+                div_grafana_app = await loc_div_grafana_app.bounding_box()
+                logging.debug("div_grafana_app height {}, y {}".format(div_grafana_app["height"], div_grafana_app["y"]))
+                div_grafana_app_height = div_grafana_app["height"]
+                # div_grafana_app height 1024, y 0
+
+                logging.debug("locate #pageContent")
+                loc_div_page_content = page.locator("#pageContent")
+                div_page_content = await loc_div_page_content.bounding_box()
+                logging.debug("div_page_content height {}, y {}".format(div_page_content["height"], div_page_content["y"]))
+                # div_page_content height 9276, y 80
+
+                logging.debug("locate div.main-view")
+                loc_div_main_view_content = page.locator("div.main-view")
+                div_main_view_content = await loc_div_main_view_content.bounding_box()
+                logging.debug("div_main_view_content height {}, y {}".format(div_main_view_content["height"], div_main_view_content["y"]))
+                # div_main_view_content height 9356, y 0
+
+                # wrapper
+                logging.debug("locate wrapper")
+                loc_wrapper = page.locator("a[title='Go to home']").locator("..")
+                wrapper = await loc_wrapper.bounding_box()
+                await loc_wrapper.highlight()
+                logging.debug("click in the empty space at the top")
+                await loc_wrapper.click(position={"x": 0, "y": 30}, force=True)
+
+                # breadcrumbs = Grafana icon, Home->Dashboards, Share, Edit...
+                logging.debug("locate header breadcrumbs")
+                loc_breadcrumbs = page.get_by_test_id("data-testid Nav toolbar").locator("xpath=..")
+                breadcrumbs = await loc_breadcrumbs.bounding_box()
+                logging.debug("header breadcrumbs height {}, y {}".format(breadcrumbs["height"], breadcrumbs["y"]))
+                # header breadcrumbs height 80, y 0
+
+                # toolbar ("Datasource and the dropdown variables")
+                # by_id finds the Bar with Datasource..., one up is a div with
+                # padding, so that it fills up all space betw. breadcrumbs
+                # and the panel area
+                logging.debug("locate header/toolbar")
+                loc_padded_toolbar = page.get_by_test_id("data-testid dashboard controls").locator("xpath=..")
+                padded_toolbar = await loc_padded_toolbar.bounding_box()
+                padded_toolbar_height = padded_toolbar["height"]
+                logging.debug("padded_toolbar height {}, y {}".format(padded_toolbar["height"], padded_toolbar["y"]))
+                # padded_toolbar height 64, y 80
+
+                # <main is a padded panel area
+                logging.debug("locate ngroot")
+                loc_ngroot = page.locator("#ngRoot")
+                ngroot = await loc_ngroot.bounding_box()
+                logging.debug("ngroot height {}, y {}".format(ngroot["height"], ngroot["y"]))
+                logging.debug("locate main with section and div")
+                loc_main = loc_ngroot.locator('xpath=..')
+                main = await loc_main.bounding_box()
+
+                # main contains toolbar section and a panel area
+
+                logging.debug("box div.react-grid-layout")
+                # the minimal panel area
+                loc_div_react_grid_layout = page.locator("div.react-grid-layout").locator('nth=1')
+                div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                logging.debug("padded panel area")
+                loc_padded_panels = loc_div_react_grid_layout.locator('xpath=..').locator('xpath=..').locator('xpath=..').locator('xpath=..')
+                padded_panels = await loc_padded_panels.bounding_box()
+
+                # the height of the dashboard variable dropdowns
+                header_height = padded_toolbar["height"] + breadcrumbs["height"]
+                logging.debug("header (breadcrumbs+toolbar) height is {}".format(header_height))
+                logging.debug("div_react_grid_layout (all the panels) height is {}".format(div_react_grid_layout["height"]))
+
+                # expect that there is at least one progress/loading-wheel
+                # immediately after a page has loaded.
+                loc_loading_wheel = page.locator("div.panel-loading")
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("initially found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).not_to_have_count(0, timeout=1000)
+                except:
+                    logging.debug("no wheel appeared")
+                    # maybe loading was very quick and is already done
+                    pass
+                # now expect all wheels to disappear.
+                try:
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("found {} wheels".format(num_loading_wheel))
+                    await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                    logging.debug("no more wheels")
+                except:
+                    # loading took to much time
+                    num_loading_wheel = await loc_loading_wheel.count()
+                    logging.debug("still found {} wheels after {}s".format(num_loading_wheel, load_wait/1000))
+                    pass
+
+                #await loc_main.hover()
+                #await loc_wrapper.click()
+
+                div_react_grid_layout_bottom = div_react_grid_layout["height"] + div_react_grid_layout["y"]
+                logging.debug("BOTT {}".format(div_react_grid_layout_bottom))
+                # 9336
+                # on a wheel down event, this happens:
+                # div_scrollbar_view height and y always stay the same
+                #  because it's a bit more than the browser size does not move
+                #  height 952 and y 80 mean: bottom visible area is 1032
+                # div_react_grid_layout height stays biig and y decreases.
+                #  it even gets negative, because the upper edge moves above the
+                #  visibe window. height 1284 and y 136 mean: bottom is at 1420
+                #  (136 is probably the height of the variable/button row)
+                # now we scroll until bottom 1420 decreases to 1032, so that
+                # bottom of visible area and bottom of dashboard touch
+                scroll_distance = int(div_grafana_app_height / 10)
+                while div_react_grid_layout_bottom >= div_grafana_app_height:
+                    await page.mouse.wheel(0, scroll_distance)
+                    #await page.keyboard.press('PageDown');
+                    await page.wait_for_load_state("networkidle")
+                    try:
+                        await expect(loc_loading_wheel).to_have_count(0, timeout=load_wait)
+                        logging.debug("no loading wheel found")
+                    except:
+                        num_loading_wheel = await loc_loading_wheel.count()
+                        logging.info("still {} wheels found, wait for network idle".format(num_loading_wheel))
+                        pass
+                    await page.wait_for_load_state("networkidle")
+                    logging.debug("main h {} y {}".format(main["height"], main["y"]))
+                    div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                    div_react_grid_layout_bottom = div_react_grid_layout["y"] + div_react_grid_layout["height"]
+                    ##loc_div_react_grid_layout = page.locator("div.react-grid-layout").locator('nth=1')
+                    ##div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                    logging.debug("div_react_grid_layout1 h {:.0f} y {:.0f}".format(div_react_grid_layout["height"], div_react_grid_layout["y"]))
+                    #loc_div_react_grid_layout = page.locator("div.react-grid-layout").locator('nth=0')
+                    #div_react_grid_layout = await loc_div_react_grid_layout.bounding_box()
+                    #logging.debug("div_react_grid_layout0 h {:.0f} y {:.0f}".format(div_react_grid_layout["height"], div_react_grid_layout["y"]))
+# startet mit 128 von oben, ist 9188 lang. Unterkante bei 9316
+#2024-12-10 12:43:35,103 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,177 DEBUG:div_react_grid_layout0 h 9188 y 128
+#2024-12-10 12:43:35,198 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,259 DEBUG:div_react_grid_layout0 h 9188 y 108
+#2024-12-10 12:43:35,281 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,338 DEBUG:div_react_grid_layout0 h 9188 y 88
+#2024-12-10 12:43:35,367 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,422 DEBUG:div_react_grid_layout0 h 9188 y 68
+#2024-12-10 12:43:35,448 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,505 DEBUG:div_react_grid_layout0 h 9188 y 48
+#2024-12-10 12:43:35,533 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,589 DEBUG:div_react_grid_layout0 h 9188 y 28
+#2024-12-10 12:43:35,617 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,687 DEBUG:div_react_grid_layout0 h 9188 y 8
+#2024-12-10 12:43:35,718 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,772 DEBUG:div_react_grid_layout0 h 9188 y -12
+#2024-12-10 12:43:35,795 DEBUG:main h 9276 y 80
+#2024-12-10 12:43:35,831 DEBUG:div_react_grid_layout0 h 9188 y -32
+# ...
+#2024-12-10 12:41:34,729 DEBUG:main h 9276 y 80
+#2024-12-10 12:41:34,763 DEBUG:div_react_grid_layout1 h 9188 y -8172
+#2024-12-10 12:41:34,780 DEBUG:div_react_grid_layout0 h 9188 y -8172
+#2024-12-10 12:41:34,796 DEBUG:main h 9276 y 80
+#2024-12-10 12:41:34,834 DEBUG:div_react_grid_layout1 h 9188 y -8184
+#2024-12-10 12:41:34,849 DEBUG:div_react_grid_layout0 h 9188 y -8184 bleibt 8184
+# 
+                    div_react_grid_layout_bottom = div_react_grid_layout["height"] + div_react_grid_layout["y"]
+                    logging.debug("BOTT {}".format(div_react_grid_layout_bottom))
+                    logging.debug("while {}+{}={} > {}".format(padded_toolbar_height, div_react_grid_layout_bottom, padded_toolbar_height + div_react_grid_layout_bottom, div_grafana_app_height))
+                    logging.debug("")
+
+    
+                # Based on react-grid-layout plus the header heights
+                # we will resize the viewport so that the viewport is only
+                # as big as necessary but big enough to show all the panels.
+                # (plus a few pixels more, 2*toolbar height)
+                new_height = div_react_grid_layout["height"] + 4 * padded_toolbar_height
+                await page.set_viewport_size({"width": viewport_width, "height": new_height})
+                logging.debug("adjusted viewport size to {}x{}".format(viewport_width, new_height))
+
+
+                await take_picture(loc_div_react_grid_layout, config, filename)
+
+            elif grafana_version.startswith("9"):
                 #    scrollbar-view
                 #?     dashboard-content - scrollbar-view without some margin
                 #      submenu-controls - dropdown-variables (optional!)
@@ -455,6 +631,48 @@ async def main(config):
 
         await browser.close()
         logging.debug("Browser closed")
+
+
+async def take_picture(locator, config, filename):
+    #await loc_div_scrollbar_view.screenshot(path=filename)
+    await locator.screenshot(path=filename)
+    if "pdf" in config and config["pdf"] == True:
+        await page.pdf(path=filename+".pdf")
+    logging.info("Saved screenshot to {}".format(filename))
+    filesize1 = os.stat(filename).st_size
+    image = Image.open(filename)
+    width, height = image.size
+    logging.debug("filesize is {}".format(filesize1))
+    logging.debug("image mode is {}, dimensions {}x{}".format(image.mode, width, height))
+    if "postprocess" in config and config["postprocess"]:
+        # PDF conversion may fail if the images are too big. Reduce
+        # the size.
+        colormode = config["colormode"] if "colormode" in config else "RGB"
+        colors = int(config["colors"]) if "colors" in config else 256
+        if image.mode != colormode and colors != "true":
+            logging.debug("converting image to colormode {} with {} colors".format(colormode, colors))
+            image = image.convert(colormode, palette=Image.ADAPTIVE, colors=colors)
+        elif image.mode != colormode:
+            logging.debug("converting image to colormode {}".format(colormode))
+            image = image.convert(colormode)
+        elif colors != "true":
+            logging.debug("converting image to {} colors".format(colors))
+            image = image.convert(image.mode, palette=Image.ADAPTIVE, colors=colors)
+        width, height = image.size
+        if "resize" in config and config["resize"]:
+            new_width = int(config["resize_width"]) if "resize_width" in config else int(width/2)
+            new_height = int(new_width * height / width)
+            #image.resize((new_width, new_height)).save(filename, optimize=True)
+            image.resize((new_width, new_height)).save(filename)
+        else:
+            image.save(filename)
+        width, height = image.size
+        logging.debug("now image mode is {}, dimensions {}x{}".format(image.mode, width, height))
+        filesize2 = os.stat(filename).st_size
+        logging.debug("reduced the filesize from {} to {}".format(filesize1, filesize2))
+
+
+
 
 if __name__ == "__main__":
     config_file = os.environ.get("GRAPSHOT_DASHBOARDS", None)
